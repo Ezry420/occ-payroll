@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OCC Payroll System</title>
+<meta name="description" content="Opol Community College DTR &amp; Payroll System">
+<meta name="theme-color" content="#17345e">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="OCC Payroll">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<script src="config.js"></script>
+<style>
+  :root{--navy:#17345e;--blue:#3157d5;--muted:#5b6b86;--line:#d5def0}
+  html,body{margin:0;height:100%;background:#fff;overflow:hidden}
+  body{font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:var(--navy);-webkit-text-size-adjust:100%}
+  #occApp{position:fixed;inset:0;width:100%;height:100%;border:0;display:block;background:#fff}
+  #splash{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;padding:24px;background:#fff;text-align:center;transition:opacity .25s ease}
+  #splash.gone{opacity:0;pointer-events:none}
+  #splash[hidden]{display:none}
+  .box{display:flex;flex-direction:column;align-items:center;gap:10px;max-width:360px}
+  .logo{width:123px;height:auto}
+  h1{margin:6px 0 0;font-size:20px;line-height:1.25}
+  .school{margin:0;color:var(--muted);font-size:13px}
+  .spin{width:34px;height:34px;margin-top:14px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--blue);animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){.spin{animation-duration:2.4s}}
+  .msg{margin:12px 0 0;font-weight:700;font-size:15px}
+  .sub{margin:2px 0 0;color:var(--muted);font-size:13.5px}
+  .actions{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:14px}
+  .actions[hidden],.spin[hidden],.sub[hidden]{display:none}
+  .btn{min-height:44px;padding:10px 18px;border-radius:10px;border:1px solid var(--line);background:#f4f7fd;color:var(--navy);font:inherit;font-weight:700;cursor:pointer}
+  .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+  .btn.link{background:none;border-color:transparent;color:var(--blue);text-decoration:underline;font-weight:600}
+  #installBar{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:20;display:flex;align-items:center;gap:10px;
+    max-width:520px;margin:0 auto;padding:10px 10px 10px 12px;border-radius:14px;background:#fff;border:1px solid var(--line);box-shadow:0 12px 34px rgba(15,23,42,.22)}
+  #installBar[hidden]{display:none}
+  #installBar img{width:40px;height:40px;border-radius:9px;flex:0 0 auto}
+  #installBar .t{flex:1 1 auto;min-width:0;font-size:13.5px;line-height:1.35}
+  #installBar .t b{display:block;font-size:14px}
+  #installBar .btn{min-height:40px;padding:8px 14px}
+  #installBar .x{flex:0 0 auto;width:40px;min-height:40px;padding:0;border:0;background:none;color:var(--muted);font-size:22px;line-height:1;cursor:pointer}
+</style>
+</head>
+<body>
+<iframe id="occApp" title="OCC Payroll System" allow="clipboard-write; fullscreen"></iframe>
+
+<div id="splash" role="status" aria-live="polite">
+  <div class="box">
+    <img class="logo" src="icons/logo.png" alt="Opol Community College logo">
+    <h1>OCC Payroll System</h1>
+    <p class="school">Opol Community College</p>
+    <div class="spin" id="spin" aria-hidden="true"></div>
+    <p class="msg" id="msg">Opening…</p>
+    <p class="sub" id="sub" hidden></p>
+    <div class="actions" id="actions" hidden>
+      <button type="button" class="btn primary" id="retry">Try again</button>
+      <button type="button" class="btn" id="browser">Open in browser</button>
+      <button type="button" class="btn link" id="showAnyway" hidden>Show the page anyway</button>
+    </div>
+  </div>
+</div>
+
+<div id="installBar" hidden>
+  <img src="icons/icon-192.png" alt="">
+  <div class="t" id="installText"><b>Install the OCC Payroll app</b>Opens full screen, like your other apps.</div>
+  <button type="button" class="btn primary" id="installBtn">Install</button>
+  <button type="button" class="x" id="installClose" aria-label="Close">×</button>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var WEB_APP = String(window.OCC_WEB_APP_URL || '').trim();
+  var frame = document.getElementById('occApp');
+  var splash = document.getElementById('splash');
+  var spin = document.getElementById('spin'), msg = document.getElementById('msg'), sub = document.getElementById('sub');
+  var actions = document.getElementById('actions'), retry = document.getElementById('retry');
+  var browserBtn = document.getElementById('browser'), showAnyway = document.getElementById('showAnyway');
+  var standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  var ready = false, loadTimer = null, slowTimer = null, installEvent = null;
+
+  function validLink(u) {
+    if (!u || u.indexOf('PASTE_') >= 0) return false;
+    return /^https:\/\/[^\s"'<>]+$/.test(u) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/[^\s"'<>]*$/.test(u);
+  }
+  var innerOrigin = '';
+  try { innerOrigin = new URL(WEB_APP).origin; } catch (e) {}
+
+  function show(state) {
+    var loading = state === 'loading' || state === 'slow';
+    spin.hidden = !loading;
+    actions.hidden = loading && state !== 'slow';
+    retry.hidden = state === 'setup';
+    browserBtn.hidden = state === 'setup' || state === 'offline';
+    showAnyway.hidden = state !== 'problem';
+    sub.hidden = state === 'loading';
+    if (state === 'loading') { msg.textContent = 'Opening…'; }
+    if (state === 'slow') { msg.textContent = 'Still opening…'; sub.textContent = 'The connection or the server is slow right now. Please wait a little longer.'; }
+    if (state === 'offline') { msg.textContent = 'No internet connection'; sub.textContent = 'Connect to Wi-Fi or mobile data, then tap Try again.'; }
+    if (state === 'setup') { msg.textContent = 'Almost ready'; sub.textContent = 'The app is not linked to the payroll system yet. Open config.js and paste the web app link (it ends with /exec).'; }
+    if (state === 'problem') { msg.textContent = 'The system did not open inside the app'; sub.textContent = 'Tap Try again. If it keeps happening, use Open in browser and tell the system administrator (the app link may not be set up in Apps Script yet).'; }
+  }
+
+  function hideSplash() {
+    if (ready) return;
+    ready = true;
+    clearTimeout(loadTimer); clearTimeout(slowTimer);
+    splash.classList.add('gone');
+    setTimeout(function () { if (ready) splash.hidden = true; }, 260);
+    setTimeout(installBarMaybe, 1200);
+  }
+
+  function open() {
+    clearTimeout(loadTimer); clearTimeout(slowTimer);
+    ready = false; splash.hidden = false; splash.classList.remove('gone');
+    if (!validLink(WEB_APP)) { show('setup'); return; }
+    if (navigator.onLine === false) { show('offline'); return; }
+    show('loading');
+    frame.src = WEB_APP + (WEB_APP.indexOf('?') >= 0 ? '&' : '?') + 'app=1';
+    slowTimer = setTimeout(function () { if (!ready) show('slow'); }, 15000);
+  }
+
+  // The payroll system says "ready" as soon as its sign-in page (or dashboard) is on screen.
+  window.addEventListener('message', function (e) {
+    var d = e.data;
+    if (!d || d.occApp !== 'ready') return;
+    if (!/\.googleusercontent\.com$/i.test(e.origin) && e.origin !== innerOrigin) return;
+    hideSplash();
+  });
+  frame.addEventListener('load', function () {
+    if (!frame.getAttribute('src') || ready) return;
+    clearTimeout(loadTimer);
+    loadTimer = setTimeout(function () { if (!ready) { clearTimeout(slowTimer); show('problem'); } }, 12000);
+  });
+  retry.addEventListener('click', open);
+  browserBtn.addEventListener('click', function () { if (validLink(WEB_APP)) window.open(WEB_APP, '_blank', 'noopener'); });
+  showAnyway.addEventListener('click', hideSplash);
+  window.addEventListener('online', function () { if (!ready) open(); });
+
+  // ---- "Install the app" bar (only in the browser, never inside the installed app) ----
+  var bar = document.getElementById('installBar'), barText = document.getElementById('installText');
+  var barBtn = document.getElementById('installBtn'), barClose = document.getElementById('installClose');
+  function dismissed() { try { return localStorage.getItem('occAppInstallDismissed') === '1'; } catch (e) { return false; } }
+  function isIos() { return /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
+  function installBarMaybe() {
+    if (standalone || !ready || dismissed()) return;
+    if (installEvent) {
+      barText.innerHTML = '<b>Install the OCC Payroll app</b>Opens full screen, like your other apps.';
+      barBtn.hidden = false; bar.hidden = false;
+    } else if (isIos()) {
+      barText.innerHTML = '<b>Install the OCC Payroll app</b>In Safari, tap Share <span aria-hidden="true">↑</span> then <b style="display:inline">Add to Home Screen</b>.';
+      barBtn.hidden = true; bar.hidden = false;
+    }
+  }
+  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); installEvent = e; installBarMaybe(); });
+  window.addEventListener('appinstalled', function () { installEvent = null; bar.hidden = true; });
+  barBtn.addEventListener('click', function () {
+    if (!installEvent) return;
+    var ev = installEvent; installEvent = null; bar.hidden = true;
+    ev.prompt();
+    if (ev.userChoice) ev.userChoice.then(function () {}, function () {});
+  });
+  barClose.addEventListener('click', function () {
+    bar.hidden = true;
+    try { localStorage.setItem('occAppInstallDismissed', '1'); } catch (e) {}
+  });
+
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    navigator.serviceWorker.register('sw.js').catch(function () {});
+  }
+  open();
+})();
+</script>
+</body>
+</html>
