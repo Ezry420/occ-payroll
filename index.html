@@ -36,6 +36,12 @@
   .btn{min-height:44px;padding:10px 18px;border-radius:10px;border:1px solid var(--line);background:#f4f7fd;color:var(--navy);font:inherit;font-weight:700;cursor:pointer}
   .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
   .btn.link{background:none;border-color:transparent;color:var(--blue);text-decoration:underline;font-weight:600}
+  .install{display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:10px;max-width:340px}
+  .install[hidden],.install [hidden]{display:none}
+  .install .msg{margin-top:4px}
+  .install .btn.big{width:100%;min-height:48px;margin-top:8px;font-size:16px}
+  .steps{margin:6px 0 0;padding-left:22px;text-align:left;font-size:14.5px;line-height:1.6}
+  .done{margin:8px 0 0;padding:10px 12px;border-radius:10px;background:#ecfdf3;color:#166534;font-weight:700}
   #installBar{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:20;display:flex;align-items:center;gap:10px;
     max-width:520px;margin:0 auto;padding:10px 10px 10px 12px;border-radius:14px;background:#fff;border:1px solid var(--line);box-shadow:0 12px 34px rgba(15,23,42,.22)}
   #installBar[hidden]{display:none}
@@ -62,6 +68,18 @@
       <button type="button" class="btn" id="browser">Open in browser</button>
       <button type="button" class="btn link" id="showAnyway" hidden>Show the page anyway</button>
     </div>
+    <div class="install" id="installPanel" hidden>
+      <p class="msg">Install the OCC Payroll app</p>
+      <p class="sub" id="installHow">Getting the install button ready…</p>
+      <button type="button" class="btn primary big" id="installNow" hidden>Install app</button>
+      <ol class="steps" id="iosSteps" hidden>
+        <li>Tap the <b>Share</b> button (square with an arrow ↑) at the bottom of Safari.</li>
+        <li>Scroll down and tap <b>Add to Home Screen</b>.</li>
+        <li>Tap <b>Add</b>. The OCC Payroll icon appears on your home screen.</li>
+      </ol>
+      <p class="done" id="installDone" hidden>Installed ✓ Open <b>OCC Payroll</b> from your home screen or app list.</p>
+      <button type="button" class="btn link" id="skipInstall">Continue without installing</button>
+    </div>
   </div>
 </div>
 
@@ -82,7 +100,9 @@
   var actions = document.getElementById('actions'), retry = document.getElementById('retry');
   var browserBtn = document.getElementById('browser'), showAnyway = document.getElementById('showAnyway');
   var standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
-  var ready = false, loadTimer = null, slowTimer = null, installEvent = null;
+  var ready = false, systemReady = false, loadTimer = null, slowTimer = null, installEvent = null, lastState = 'loading';
+  // Opened from the system's "Install" button (…/?install=1): show the install screen first.
+  var installOpen = !standalone && /[?&]install=1(&|$)/.test(location.search);
 
   function validLink(u) {
     if (!u || u.indexOf('PASTE_') >= 0) return false;
@@ -92,7 +112,10 @@
   try { innerOrigin = new URL(WEB_APP).origin; } catch (e) {}
 
   function show(state) {
+    lastState = state;
+    if (installOpen) return;                 // the install screen stays until the person continues
     var loading = state === 'loading' || state === 'slow';
+    msg.hidden = false;
     spin.hidden = !loading;
     actions.hidden = loading && state !== 'slow';
     retry.hidden = state === 'setup';
@@ -107,7 +130,7 @@
   }
 
   function hideSplash() {
-    if (ready) return;
+    if (ready || installOpen) return;
     ready = true;
     clearTimeout(loadTimer); clearTimeout(slowTimer);
     splash.classList.add('gone');
@@ -117,12 +140,12 @@
 
   function open() {
     clearTimeout(loadTimer); clearTimeout(slowTimer);
-    ready = false; splash.hidden = false; splash.classList.remove('gone');
+    ready = false; systemReady = false; splash.hidden = false; splash.classList.remove('gone');
     if (!validLink(WEB_APP)) { show('setup'); return; }
     if (navigator.onLine === false) { show('offline'); return; }
     show('loading');
     frame.src = WEB_APP + (WEB_APP.indexOf('?') >= 0 ? '&' : '?') + 'app=1';
-    slowTimer = setTimeout(function () { if (!ready) show('slow'); }, 15000);
+    slowTimer = setTimeout(function () { if (!systemReady) show('slow'); }, 15000);
   }
 
   // The payroll system says "ready" as soon as its sign-in page (or dashboard) is on screen.
@@ -130,25 +153,63 @@
     var d = e.data;
     if (!d || d.occApp !== 'ready') return;
     if (!/\.googleusercontent\.com$/i.test(e.origin) && e.origin !== innerOrigin) return;
+    systemReady = true;
     hideSplash();
   });
   frame.addEventListener('load', function () {
-    if (!frame.getAttribute('src') || ready) return;
+    if (!frame.getAttribute('src') || systemReady) return;
     clearTimeout(loadTimer);
-    loadTimer = setTimeout(function () { if (!ready) { clearTimeout(slowTimer); show('problem'); } }, 12000);
+    loadTimer = setTimeout(function () { if (!systemReady) { clearTimeout(slowTimer); show('problem'); } }, 12000);
   });
   retry.addEventListener('click', open);
   browserBtn.addEventListener('click', function () { if (validLink(WEB_APP)) window.open(WEB_APP, '_blank', 'noopener'); });
-  showAnyway.addEventListener('click', hideSplash);
-  window.addEventListener('online', function () { if (!ready) open(); });
+  showAnyway.addEventListener('click', function () { systemReady = true; hideSplash(); });
+  window.addEventListener('online', function () { if (!systemReady) open(); });
+
+  function isIos() { return /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
+  function isIosSafari() { var ua = navigator.userAgent; return isIos() && /Safari/.test(ua) && !/CriOS|FxiOS|EdgiOS|OPiOS|FBAN|FBAV|Instagram|Line\//.test(ua); }
+
+  // ---- install screen (…/?install=1) ----
+  var panel = document.getElementById('installPanel'), how = document.getElementById('installHow');
+  var installNow = document.getElementById('installNow'), iosSteps = document.getElementById('iosSteps');
+  var installDone = document.getElementById('installDone'), skip = document.getElementById('skipInstall');
+  function panelUpdate() {
+    if (!installOpen) return;
+    if (isIos()) {
+      iosSteps.hidden = false; installNow.hidden = true;
+      how.textContent = isIosSafari() ? 'On iPhone, add it to your home screen:' : 'Open this page in Safari first, then:';
+    } else if (installEvent) {
+      installNow.hidden = false;
+      how.textContent = 'Tap Install app, then Install. The app appears with your other apps.';
+    } else {
+      installNow.hidden = true;
+      how.textContent = 'Tap the ⋮ menu (top right), then Install app (or Add to Home screen).';
+    }
+  }
+  function openPanel() {
+    spin.hidden = true; msg.hidden = true; sub.hidden = true; actions.hidden = true;
+    panel.hidden = false;
+    if (isIos()) panelUpdate();
+    else { how.textContent = 'Getting the install button ready…'; setTimeout(panelUpdate, 2500); }
+  }
+  function closePanel() {
+    installOpen = false; panel.hidden = true;
+    if (systemReady) hideSplash(); else show(lastState);
+  }
+  installNow.addEventListener('click', function () {
+    if (!installEvent) return;
+    var ev = installEvent; installEvent = null;
+    ev.prompt();
+    if (ev.userChoice) ev.userChoice.then(function (c) { if (!c || c.outcome !== 'accepted') panelUpdate(); }, function () {});
+  });
+  skip.addEventListener('click', closePanel);
 
   // ---- "Install the app" bar (only in the browser, never inside the installed app) ----
   var bar = document.getElementById('installBar'), barText = document.getElementById('installText');
   var barBtn = document.getElementById('installBtn'), barClose = document.getElementById('installClose');
   function dismissed() { try { return localStorage.getItem('occAppInstallDismissed') === '1'; } catch (e) { return false; } }
-  function isIos() { return /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
   function installBarMaybe() {
-    if (standalone || !ready || dismissed()) return;
+    if (standalone || !ready || installOpen || dismissed()) return;
     if (installEvent) {
       barText.innerHTML = '<b>Install the OCC Payroll app</b>Opens full screen, like your other apps.';
       barBtn.hidden = false; bar.hidden = false;
@@ -157,8 +218,11 @@
       barBtn.hidden = true; bar.hidden = false;
     }
   }
-  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); installEvent = e; installBarMaybe(); });
-  window.addEventListener('appinstalled', function () { installEvent = null; bar.hidden = true; });
+  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); installEvent = e; panelUpdate(); installBarMaybe(); });
+  window.addEventListener('appinstalled', function () {
+    installEvent = null; bar.hidden = true;
+    if (installOpen) { installNow.hidden = true; iosSteps.hidden = true; how.hidden = true; installDone.hidden = false; skip.textContent = 'Continue here'; }
+  });
   barBtn.addEventListener('click', function () {
     if (!installEvent) return;
     var ev = installEvent; installEvent = null; bar.hidden = true;
@@ -173,6 +237,7 @@
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('sw.js').catch(function () {});
   }
+  if (installOpen) openPanel();
   open();
 })();
 </script>
